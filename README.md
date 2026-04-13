@@ -1,17 +1,16 @@
-
 Assignment-4 Dissecting LLaVA Vision-Language Models
 
 Name: Tarani Chilamkoti UCID: tc533 Course: DS681
 
 Overview
 
-In this report, I explain how LLaVA integrates vision and language using a simple but effective design. The focus is on how images are converted into tokens, how the model is trained, and what trade-offs this architecture makes.
+In this report, I explain how LLaVA integrates vision and language using a simple but effective architecture. The focus is on how images are converted into token embeddings, how the model is trained, and what trade-offs arise from this design.
 
 Part 1 — Architecture Understanding
 
 Task 1.1: Forward Pass Explanation
 
-Diagram of Data Flow
+Data Flow Diagram
 
 Image
   ↓
@@ -32,47 +31,51 @@ Step-by-Step Explanation
 
 1. Image Input
 
-The model takes a raw image and preprocesses it (resize, normalize).
+The model takes a raw image and preprocesses it (resize, normalization).
 
 2. Vision Encoder (CLIP)
 
-[ f_{\text{vision}}(x) ]
+𝑓vision(𝑥) 
 
-CLIP encodes the image into a feature vector.
+CLIP encodes the image into a feature vector capturing semantic information such as objects and actions.
 
-It captures semantic information (objects, actions).
-Because CLIP is trained on image-text pairs, its embeddings already relate to language.
+CLIP is trained using contrastive learning on image-text pairs, which aligns visual and textual representations into a shared semantic space.
+
 3. Projection Layer
 
-[ z = W \cdot f_{\text{vision}}(x) ]
+𝑧=𝑊⋅𝑓vision(𝑥) 
 
 This layer maps CLIP features into the LLM embedding space.
 
-Usually a linear layer or small MLP.
-Output becomes compatible with text token embeddings.
+Typically a linear layer or small MLP
+Converts visual features into token-compatible embeddings
+This works because CLIP already aligns images with text at a coarse level, so the projection only needs to perform a lightweight transformation.
+
 4. Image Tokens
 
-The projected vector is turned into a sequence:
+The projected output is converted into a sequence:
 
 [IMG_1, IMG_2, ..., IMG_k]
-These are treated like tokens.
+These act as pseudo-token embeddings.
 
 5. Language Model Input
 
 Example:
 
 [IMG TOKENS] + "What is happening in the image?"
-The image tokens are prepended to the text.
+Image tokens are prepended to the text prompt.
 
-6. Language Model
+6. Language Model (LLM)
 
-Standard transformer (e.g., LLaMA).
-Uses self-attention over both image and text tokens.
+A standard transformer (e.g., LLaMA):
+
+Processes both image and text tokens
+Uses self-attention across the entire sequence
 7. Text Generation
 
-[ P(y_t \mid x_{\text{image}}, y_{<t}) ]
+𝑃(𝑦𝑡∣𝑥image,𝑦<𝑡) 
 
-The model generates text autoregressively.
+The model generates text autoregressively conditioned on both image and previous tokens.
 
 Example
 
@@ -84,91 +87,94 @@ Input:
 Output:
 
 "The person is riding a bicycle."
-Key Idea
+Key Insight
 
-The image is converted into token embeddings so the LLM can process it like text.
+Images are converted into token embeddings so the language model can process them using its native sequence modeling mechanism.
 
 Task 1.2: Projection Layer Intuition
 
 Why a Simple Projection Works
 
-CLIP embeddings already encode semantic meaning.
-LLM embeddings also represent semantic meaning (but in language form).
-Because both spaces are structured, a linear transformation is often enough to align them.
+CLIP embeddings already encode semantic meaning
+LLM embeddings represent linguistic meaning
+Both are structured high-dimensional spaces
+A linear transformation can align them by preserving relative structure.
 
 Assumption
 
-There is an approximate linear relationship between:
+There exists an approximate linear relationship between:
 
-Vision embeddings
-Language embeddings
-So similar concepts stay close after mapping.
+Vision embedding space
+Language embedding space
+So semantically similar concepts remain close after mapping.
 
 What Could Go Wrong?
 
 If alignment is poor:
 
-The model ignores the image
-Outputs rely only on text
+The model ignores visual input
+Outputs rely only on text priors
 Hallucinations increase
 Example Failure
 
-Image: a dog Bad alignment → model says: “a cat”
+Image: a dog Incorrect Output: “a cat”
+
+This happens when visual features are misaligned with language space.
 
 Task 1.3: Key Design Choice
 
 Why No Cross-Attention?
 
-LLaVA does not use cross-attention (like Flamingo). Instead, it inserts image tokens directly into the LLM.
+Unlike models such as Flamingo, LLaVA avoids cross-attention and directly injects image tokens into the LLM.
 
 Advantages
 
 Simplicity
 
-No changes to LLM architecture
+No architectural modification to the LLM
 Efficiency
 
-Fewer parameters and computations
+Lower computational and memory cost
 Compatibility
 
 Works with pretrained LLMs
 Limitations
 
-Weak fusion
+Weak Multimodal Fusion
 
-No explicit interaction between vision and language
-Information bottleneck
+No explicit interaction between modalities
+Information Bottleneck
 
-Image compressed into few tokens
-Limited reasoning
+High-dimensional images compressed into limited tokens
+Limited Reasoning
 
-Harder to understand spatial details
+Struggles with spatial and compositional reasoning
 Summary Table
 
 Design	Pros	Cons
-Token Injection	Simple, fast	Weak multimodal fusion
-Cross-Attention	Strong fusion	Expensive
+Token Injection	Simple, efficient	Weak multimodal fusion
+Cross-Attention	Strong fusion	Higher cost
 Part 2 — Training Pipeline
 
 Task 2.1: Two-Stage Training
 
 Training Objective
 
-[ L = - \sum_t \log P(y_t \mid x_{\text{image}}, y_{<t}) ]
+𝐿=−∑𝑡log𝑃(𝑦𝑡∣𝑥image,𝑦<𝑡) 
 
-The model learns to predict the next token given the image and previous text.
+The model learns to predict the next token conditioned on the image and previous text.
 
 Stage 1 — Feature Alignment
 
 CLIP and LLM are frozen
-Only projection layer is trained
-Goal: Align visual features with LLM embeddings
+Only the projection layer is trained
+Goal: Align visual features with the LLM embedding space
 
-What is learned: How to convert image features into meaningful tokens
+What is learned: Mapping image features → meaningful token embeddings
 
 Stage 2 — Visual Instruction Tuning
 
-Train projection + LLM
+Train projection layer + LLM
 Data format:
 
 (Image + Instruction) → Response
@@ -183,64 +189,62 @@ Output:
 What the Model Learns
 
 Stage	Learning
-Stage 1	Alignment
-Stage 2	Instruction following
+Stage 1	Representation alignment
+Stage 2	Instruction following and multimodal behavior
 Why Both Stages Are Needed
 
-Stage 1: makes image understandable
-Stage 2: teaches how to respond
-Without both, the model fails.
+Stage 1 ensures the model understands visual input
+Stage 2 teaches how to use that information in tasks
+Without Stage 1 → no grounding Without Stage 2 → no useful responses
 
 Task 2.2: Synthetic Data
 
 Why Synthetic Data?
 
-Human annotation is expensive
+Human annotation is expensive and slow.
 
-GPT-generated data is:
+GPT-generated data provides:
 
-Scalable
-Fast
-Cheap
+Scalability
+Speed
+Low cost
 Biases Introduced
 
-Similar writing style (LLM-like)
-Possible incorrect answers
-Limited diversity
+Uniform writing style (LLM-like)
+Possible incorrect reasoning
+Limited diversity of scenarios
 Effect on Generalization
 
-Works well on common tasks
-Struggles with unusual or real-world cases
+Performs well on common tasks
+Struggles with edge cases and real-world variability
 Part 3 — Reflection
 
 1. Is LLaVA Truly Multimodal?
 
-Not fully.
+LLaVA is not fully multimodal.
 
 It is better described as:
 
 A language model conditioned on visual features
 
-Because:
+This is because it does not learn a joint representation of vision and language, but instead relies on externally encoded visual embeddings.
 
-Vision is converted into tokens
-No deep multimodal fusion
 2. Where Does Alignment Happen?
 
-Two places:
+Alignment occurs at two levels:
 
-Projection layer
+Projection Layer (Structural Alignment)
 
-Aligns embeddings
-Instruction tuning
+Aligns embedding spaces
+Instruction Tuning (Functional Alignment)
 
-Teaches usage
+Teaches how to use visual information
 Conclusion
 
-Both are necessary:
+Both stages are necessary:
 
-Projection = understanding
-Instruction tuning = behavior
+Projection enables understanding
+Instruction tuning enables correct behavior
 3. Biggest Limitation
 
 Weak Multimodal Fusion
@@ -250,16 +254,18 @@ Effects
 Poor spatial reasoning
 Hallucination
 Limited compositional understanding
-Cause
+Root Cause
 
-No cross-attention
-Image compressed into tokens
+No cross-attention mechanism
+Compressed visual representation
+No iterative interaction between vision and language during inference
 Final Summary
 
-LLaVA connects vision and language using a projection layer.
-Images are turned into tokens and fed into an LLM.
-Training uses alignment + instruction tuning.
-The model is simple and efficient but has weak multimodal reasoning.
-One Line Takeaway
+LLaVA connects vision and language using a projection layer
+Images are converted into tokens and processed by an LLM
+Training consists of alignment and instruction tuning
+The architecture prioritizes simplicity and efficiency over deep multimodal reasoning
+One-Line Takeaway
 
-LLaVA works by aligning vision features with language tokens, not by deeply integrating the two modalities.
+LLaVA works by aligning vision features with language embeddings rather than deeply integrating the two modalities.
+
